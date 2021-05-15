@@ -1,0 +1,112 @@
+#!/bin/bash -e
+
+TARGET=$1
+shift
+
+FILTER="(not port 22)"
+IF=any
+USER=root
+while true; do
+    case $1 in
+        -h|--help)
+            echo "
+RShark - Remote wireshark/tshark
+Remotely capture traffic and view it in a local instance of wireshark.
+Supports specifying ssh key and opts.
+Supports decrypting traffic (note: only communication from processes that started after
+RShark was executed will be decrypted).
+
+Usage:
+rshark TARGET [-f|--filter FILTER] [-i|--interface INTERFACE] [-k|--ssh-key KEY]
+    [-o|--ssh-opt OPT] [-u|--ssh-user USER] [-d|--decrypt] [-t|--tshark]
+
+TARGET - IP or hostname to capture traffic on
+FILTER - tcpdump filter to use. Port 22 traffic is always disabled
+KEY - SSH key to use
+OPT - Additional option for ssh. Can be specified multiple times
+USER - SSH user to use (default: root)
+
+
+-d|--decrypt: Decrypt ssl traffic
+-t|--tshark: Use a remote tshark process instead of a local wireshark
+"
+            exit
+            ;;
+        -f|--filter)
+            FILTER="$BASE_FILTER and ($2)"
+            shift
+            ;;
+        -i|--interface)
+            IF=$2
+            shift
+            ;;
+        -k|--ssh-key)
+            KEY=$2
+            shift
+            ;;
+        -o|--ssh-opt)
+            OPTS="$OPTS -o $2"
+            shift
+            ;;
+        -u|--ssh-user)
+            USER=$2
+            shift
+            ;;
+        -d|--decrypt)
+            DECRYPT="SET"
+            ;;
+        -t|--tshark)
+            TSHARK="SET"
+            ;;
+        *)
+            break
+            ;;
+    esac
+    shift
+done
+
+if ! which ssh > /dev/null 2>&1; then
+    echo "ssh is not installed. rshark requires ssh to execute"
+    exit
+fi
+
+if [ -n "$TSHARK" ]; then
+    if ! which tshark > /dev/null 2>&1; then
+        echo "tshark is not installed. rshark requires tshark to execute with the specified parameters"
+        exit
+    fi
+else
+    if ! which wireshark > /dev/null 2>&1; then
+        echo "wireshark is not installed. rshark requires wireshark to execute with the specified parameters"
+        exit
+    fi
+fi
+
+SSH="ssh"
+if [ -n "$KEY" ]; then
+    SSH="$SSH -i $KEY"
+fi
+if [ -n "$OPTS" ]; then
+    SSH="$SSH $OPTS"
+fi
+SSH="$SSH $USER@$TARGET"
+
+if [ -n "$DECRYPT" ]; then
+    $SSH 'echo "export SSLKEYLOGFILE=/tmp/sslkey.log" >> /etc/environment'
+    coproc KEYLOG_STREAM { $SSH 'touch $SSLKEYLOGFILE; tail -f $SSLKEYLOGFILE & read; kill $!'; } > /tmp/sslkey.log
+    trap 'echo >&"${KEYLOG_STREAM[1]}"' EXIT
+    KEYLOG_OPT="-o ssl.keylog_file:/tmp/sslkey.log"
+    SSL_ARGS="-o ssl.desegment_ssl_records:TRUE -o ssl.desegment_ssl_application_data:TRUE"
+fi
+if [ -n "$TSHARK" ]; then
+    $SSH "tshark $KEYLOG_OPT $SSL_ARGS -f '$FILTER'"
+else
+    $SSH "tcpdump -nni $IF -U -w - -f '$FILTER'" | wireshark -k $KEYLOG_OPT -i -
+fi
+
+if [ -n "$DECRYPT" ]; then
+    echo '' >&"${KEYLOG_STREAM[1]}"
+    trap - EXIT
+    $SSH 'sed -i "/SSLKEYLOGFILE.*/d" /etc/environment; rm -f $SSLKEYLOGFILE'
+    rm /tmp/sslkey.log
+fi
