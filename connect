@@ -1,0 +1,77 @@
+#!/bin/bash
+
+USER=root
+while true; do
+    case $1 in
+        -h|--help)
+            echo "
+Connect - SSH simplified utility
+
+Usage:
+connect TARGET [-i|--key KEY] [-o|--opt OPT] [-u|--user USER] [-c|--command COMMAND]
+    [-n|--no-host-check] [-s|--silent] [-x|--x11-forwarding]
+
+TARGET - IP or hostname to capture traffic on
+KEY - key to use
+OPT - Additional option. Can be specified multiple times
+USER - user to use (default: root)
+COMMAND - Execute the command throught the SSH connection without opening a terminal
+"
+            exit
+            ;;
+        -i|--key)
+            OPTS="$OPTS -i $2"
+            shift
+            ;;
+        -o|--opt)
+            OPTS="$OPTS -o $2"
+            shift
+            ;;
+        -u|--user)
+            USER=$2
+            shift
+            ;;
+        -c|--command)
+            COMMAND=$2
+            shift
+            ;;
+        -n|--no-host-check)
+            OPTS="$OPTS -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            ;;
+        -s|--silent)
+            SILENT="SET"
+            ;;
+        -x|--x11-forwarding)
+            OPTS="$OPTS -Y"
+            ;;
+        '')
+            break
+            ;;
+        *)
+            if [ -z "$TARGET" ]; then
+                TARGET=$1
+            else
+                echo "Unrecognized argument '$1'"
+                exit
+            fi
+            ;;
+    esac
+    shift
+done
+
+if ! which ssh > /dev/null 2>&1; then
+    echo "ssh is not installed. rshark requires ssh to execute"
+    exit
+fi
+
+SSH="ssh"
+if [ -n "$OPTS" ]; then
+    SSH="$SSH $OPTS"
+fi
+SSH="$SSH $USER@$TARGET"
+
+if [ -n "$SILENT" ]; then
+    $SSH $COMMAND 2>/dev/null
+else
+    $SSH $COMMAND
+fi
