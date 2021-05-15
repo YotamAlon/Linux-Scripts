@@ -1,8 +1,5 @@
 #!/bin/bash -e
 
-TARGET=$1
-shift
-
 FILTER="(not port 22)"
 IF=any
 USER=root
@@ -58,8 +55,16 @@ USER - SSH user to use (default: root)
         -t|--tshark)
             TSHARK="SET"
             ;;
-        *)
+        '')
             break
+            ;;
+        *)
+            if [ -z "$TARGET" ]; then
+                TARGET=$1
+            else
+                echo "Unrecognized argument '$1'"
+                exit
+            fi
             ;;
     esac
     shift
